@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文湖線注意點動態提示系統 (絕對GPS觸發版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 260px; width: 100%; border-radius: 8px; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans pb-10">
+
+    <script>
+        // 🚀 【核心設定】可放雲端網址或本機相對路徑（例如 'data.tsv'），系統會自動完美相容
+        const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTNlyDn6slXNmgc-wyT7CMvbvexRsJIi5H5E4d4HOJ2k9LE9j0QRlhpVtRO9YvfSUAEHTOV3N-9u_Y9/pub?gid=0&single=true&output=tsv';
+    </script>
+
+    <header class="bg-amber-800 text-white p-4 sticky top-0 z-50 shadow-md">
+        <div class="max-w-md mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">文湖線注意點系統 ☁️</h1>
+            <select id="directionSelect" class="bg-amber-700 text-white p-2 rounded border border-amber-600 focus:outline-none" onchange="handleDirectionChange()">
+                <option value="up">上行 (動物園 → 展覽館)</option>
+                <option value="down">下行 (展覽館 → 動物園)</option>
+            </select>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto p-4 space-y-4">
+
+        <section class="bg-white p-4 rounded-xl shadow border-l-4 border-amber-500">
+            <h2 class="text-sm font-semibold text-amber-800 mb-2 flex items-center justify-between">
+                <span>⚠️ 當前行駛區間注意點</span>
+                <span id="intervalLabel" class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">未定</span>
+            </h2>
+            <div id="activeNoticeContainer" class="space-y-4 pt-2">
+                <p class="text-sm text-gray-400 italic">正在連線雲端資料庫...</p>
+            </div>
+        </section>
+
+        <section class="bg-white p-4 rounded-xl shadow">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-sm font-semibold text-gray-500">📡 即時定位狀態</h2>
+                <button onclick="loadSheetData()" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded border">🔄 手動同步資料</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+                <div class="bg-gray-50 p-2 rounded">
+                    <span class="block text-gray-400 text-xs">當前鎖定車站</span>
+                    <span id="currentStationTxt" class="font-bold text-base text-amber-900">偵測中...</span>
+                </div>
+                <div class="bg-gray-50 p-2 rounded">
+                    <span class="block text-gray-400 text-xs">下一站預期</span>
+                    <span id="nextStationTxt" class="font-bold text-base text-gray-700">偵測中...</span>
+                </div>
+            </div>
+            <p id="gpsStatus" class="text-xs text-blue-600 mt-2 font-medium">正在初始化定位系統...</p>
+            <p id="wakeLockStatus" class="text-xs text-purple-600 mt-1 font-medium bg-purple-50 p-2 rounded border border-purple-100">正在初始化防休眠機制...</p>
+        </section>
+
+        <section class="bg-white p-4 rounded-xl shadow">
+            <h2 class="text-sm font-semibold text-gray-500 mb-2">🗺️ 沿線地圖 (已鎖定文湖線)</h2>
+            <div id="map"></div>
+        </section>
+
+        <hr class="border-gray-300 my-6">
+
+        <section class="bg-white p-4 rounded-xl shadow">
+            <div class="flex justify-between items-center cursor-pointer select-none py-1" onclick="toggleSection('allNoticesContent', 'allNoticesArrow')">
+                <h2 class="text-lg font-bold text-gray-800">📋 注意點總清單</h2>
+                <span id="allNoticesArrow" class="text-gray-400 font-bold transition-transform duration-200">▶</span>
+            </div>
+            <div id="allNoticesContent" style="display: none;" class="space-y-3 text-sm mt-4 border-t border-gray-100 pt-3">
+                <div id="allNoticesList" class="space-y-2"></div>
+            </div>
+        </section>
+
+        <section class="bg-white p-4 rounded-xl shadow">
+            <div class="flex justify-between items-center cursor-pointer select-none py-1" onclick="toggleSection('calibrateFormContent', 'calibrateArrow')">
+                <h2 class="text-lg font-bold text-gray-800">⚙️ 車站 GPS 座標微調補救</h2>
+                <span id="calibrateArrow" class="text-gray-400 font-bold transition-transform duration-200">▶</span>
+            </div>
+            <div id="calibrateFormContent" style="display: none;" class="space-y-3 text-sm mt-4 border-t border-gray-100 pt-3">
+                <div>
+                    <label class="block text-gray-600 font-medium mb-1">選擇欲校正車站</label>
+                    <select id="calibrateStation" class="w-full p-2 border rounded bg-gray-50" onchange="loadCalibrateField()"></select>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs text-gray-500">自訂緯度 (Lat)</label>
+                        <input type="number" id="customLat" step="0.000001" class="w-full p-2 border rounded bg-gray-50" placeholder="未設定">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500">自訂經度 (Lng)</label>
+                        <input type="number" id="customLng" step="0.000001" class="w-full p-2 border rounded bg-gray-50" placeholder="未設定">
+                    </div>
+                </div>
+                <button onclick="saveCalibration()" class="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 rounded shadow transition">儲存校正座標</button>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // 🎯 精準車站 GPS 觸發距離設定為 60 公尺
+        const TRIGGER_DISTANCE = 60; 
+
+        const BASE_STATIONS = [
+            { id: "BR01", name: "動物園", lat: 24.9982, lng: 121.5793 },
+            { id: "BR02", name: "木柵", lat: 24.9987, lng: 121.5731 },
+            { id: "BR03", name: "萬芳社區", lat: 25.0013, lng: 121.5676 },
+            { id: "BR04", name: "萬芳醫院", lat: 24.9998, lng: 121.5583 },
+            { id: "BR05", name: "辛亥", lat: 25.0054, lng: 121.5560 },
+            { id: "BR06", name: "麟光", lat: 25.0227, lng: 121.5585 },
+            { id: "BR07", name: "六張犁", lat: 25.0250, lng: 121.5531 },
+            { id: "BR08", name: "科技大樓", lat: 25.0261, lng: 121.5435 },
+            { id: "BR09", name: "大安", lat: 25.0329, lng: 121.5435 },
+            { id: "BR10", name: "忠孝復興", lat: 25.0416, lng: 121.5434 },
+            { id: "BR11", name: "南京復興", lat: 25.0519, lng: 121.5434 },
+            { id: "BR12", name: "中山國中", lat: 25.0608, lng: 121.5442 },
+            { id: "BR13", name: "松山機場", lat: 25.0633, lng: 121.5517 },
+            { id: "BR14", name: "大直", lat: 25.0795, lng: 121.5469 },
+            { id: "BR15", name: "劍南路", lat: 25.0848, lng: 121.5555 },
+            { id: "BR16", name: "西湖", lat: 25.0821, lng: 121.5672 },
+            { id: "BR17", name: "港墘", lat: 25.0800, lng: 121.5750 },
+            { id: "BR18", name: "文德", lat: 25.0785, lng: 121.5847 },
+            { id: "BR19", name: "內湖", lat: 25.0837, lng: 121.5941 },
+            { id: "BR20", name: "大湖公園", lat: 25.0838, lng: 121.6022 },
+            { id: "BR21", name: "葫洲", lat: 25.0726, lng: 121.6073 },
+            { id: "BR22", name: "東湖", lat: 25.0671, lng: 121.6115 },
+            { id: "BR23", name: "南港軟體園區", lat: 25.0599, lng: 121.6160 },
+            { id: "BR24", name: "南港展覽館", lat: 25.0553, lng: 121.6175 }
+        ];
+
+        let map, userMarker;
+        let currentStationIndex = null;
+        let globalNotices = []; 
+        let wakeLock = null; 
+
+        // 🛡️ 效能鎖定變數：防止無意義的重複刷洗畫面
+        let lastRenderedStationId = null;
+        let lastRenderedDirection = null;
+
+        // ⏱️ GPS 節流與移動判定變數
+        let lastGpsTime = 0;
+        let lastLat = null;
+        let lastLng = null;
+
+        window.onload = function() {
+            initUI();
+            initMap();
+            startGpsTracking();
+            loadSheetData();
+            requestWakeLock(); 
+        };
+
+        function toggleSection(contentId, arrowId) {
+            const content = document.getElementById(contentId);
+            const arrow = document.getElementById(arrowId);
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                arrow.innerText = '▼';
+            } else {
+                content.style.display = 'none';
+                arrow.innerText = '▶';
+            }
+        }
+
+        function initUI() {
+            const calibrateSelect = document.getElementById('calibrateStation');
+            BASE_STATIONS.forEach(st => {
+                let opt = new Option(`${st.id} ${st.name}`, st.id);
+                calibrateSelect.add(opt);
+            });
+            loadCalibrateField();
+        }
+
+        function initMap() {
+            map = L.map('map', {
+                dragging: false, touchZoom: false, scrollWheelZoom: false,
+                doubleClickZoom: false, boxZoom: false, zoomControl: false
+            }).setView([25.0450, 121.5750], 12);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+            const lineCoords = BASE_STATIONS.map(st => {
+                let actual = getActiveCoords(st.id);
+                return [actual.lat, actual.lng];
+            });
+            L.polyline(lineCoords, {color: '#965C1F', weight: 5, opacity: 0.85}).addTo(map);
+
+            BASE_STATIONS.forEach(st => {
+                let actual = getActiveCoords(st.id);
+                L.circleMarker([actual.lat, actual.lng], {
+                    radius: 5, color: '#965C1F', fillColor: '#FFF', fillOpacity: 1, weight: 2
+                }).addTo(map);
+            });
+
+            userMarker = L.marker([25.0450, 121.5750]).addTo(map);
+        }
+
+        async function loadSheetData() {
+            try {
+                let finalUrl = GOOGLE_SHEET_URL;
+                if (GOOGLE_SHEET_URL.startsWith('http://') || GOOGLE_SHEET_URL.startsWith('https://')) {
+                    const separator = GOOGLE_SHEET_URL.includes('?') ? '&' : '?';
+                    finalUrl = `${GOOGLE_SHEET_URL}${separator}_cb=${Date.now()}`;
+                }
+                
+                const response = await fetch(finalUrl);
+                const text = await response.text();
+                const lines = text.split(/\r?\n/);
+                const parsedNotices = [];
+
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    const cols = lines[i].split('\t'); 
+                    if (cols.length >= 4) {
+                        parsedNotices.push({
+                            id: cols[0] ? cols[0].trim() : String(Date.now() + i),
+                            stationId: cols[1] ? cols[1].trim().toUpperCase() : '',
+                            direction: cols[2] ? cols[2].trim().toLowerCase() : 'up',
+                            text: cols[3] ? cols[3].trim() : '',
+                            image: cols[4] ? cols[4].trim() : ''
+                        });
+                    }
+                }
+
+                globalNotices = parsedNotices;
+                lastRenderedStationId = null; 
+                renderActiveNotices();
+                renderAllNoticesList();
+            } catch (error) {
+                console.error("資料加載失敗:", error);
+                document.getElementById('activeNoticeContainer').innerHTML = 
+                    '<p class="text-sm text-red-500 italic">❌ 資料載入失敗，請檢查網路、路徑或雲端權限設定。</p>';
+            }
+        }
+
+        function getFilteredNotices() {
+            const localDeleted = JSON.parse(localStorage.getItem('deleted_sheet_notices') || '[]');
+            return globalNotices.filter(n => !localDeleted.includes(String(n.id)));
+        }
+
+        function getActiveCoords(stationId) {
+            const base = BASE_STATIONS.find(s => s.id === stationId);
+            const overrides = JSON.parse(localStorage.getItem('station_overrides') || '{}');
+            if (overrides[stationId]) {
+                return { lat: parseFloat(overrides[stationId].lat), lng: parseFloat(overrides[stationId].lng) };
+            }
+            return { lat: base.lat, lng: base.lng };
+        }
+
+        function loadCalibrateField() {
+            const id = document.getElementById('calibrateStation').value;
+            const overrides = JSON.parse(localStorage.getItem('station_overrides') || '{}');
+            if (overrides[id]) {
+                document.getElementById('customLat').value = overrides[id].lat;
+                document.getElementById('customLng').value = overrides[id].lng;
+            } else {
+                document.getElementById('customLat').value = '';
+                document.getElementById('customLng').value = '';
+            }
+        }
+
+        function saveCalibration() {
+            const id = document.getElementById('calibrateStation').value;
+            const lat = document.getElementById('customLat').value;
+            const lng = document.getElementById('customLng').value;
+            let overrides = JSON.parse(localStorage.getItem('station_overrides') || '{}');
+
+            if (lat && lng) {
+                overrides[id] = { lat: lat, lng: lng };
+                alert(`${id} 座標已更新！重整網頁後生效。`);
+            } else {
+                delete overrides[id];
+                alert(`${id} 已恢復預設初始座標。`);
+            }
+            localStorage.setItem('station_overrides', JSON.stringify(overrides));
+            location.reload();
+        }
+
+        function startGpsTracking() {
+            if (!navigator.geolocation) {
+                document.getElementById('gpsStatus').innerText = "❌ 錯誤：設備不支援 GPS。";
+                return;
+            }
+            const gpsOptions = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const now = Date.now();
+                    const uLat = position.coords.latitude;
+                    const uLng = position.coords.longitude;
+
+                    // ⏱️ 限制 1：每 2 秒（2000毫秒）才允許處理一次
+                    if (now - lastGpsTime < 2000) {
+                        return; 
+                    }
+
+                    // 🧭 限制 2：GPS 座標必須與上次不同（有移動變更）才觸發
+                    if (uLat === lastLat && uLng === lastLng) {
+                        return; 
+                    }
+
+                    // 通過雙重檢查，更新時間與座標紀錄點
+                    lastGpsTime = now;
+                    lastLat = uLat;
+                    lastLng = uLng;
+
+                    document.getElementById('gpsStatus').innerHTML = `<span class="text-green-600">📡 訊號正常 (誤差: ${Math.round(position.coords.accuracy)}米)</span>`;
+                    if (userMarker) userMarker.setLatLng([uLat, uLng]);
+                    processLocationLogic(uLat, uLng);
+                },
+                (error) => {
+                    document.getElementById('gpsStatus').innerHTML = `<span class="text-red-500">⚠️ 正在重新搜尋 GPS 衛星訊號...</span>`;
+                },
+                gpsOptions
+            );
+        }
+
+        function calcDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3;
+            const phi1 = lat1 * Math.PI / 180;
+            const phi2 = lat2 * Math.PI / 180;
+            const deltaPhi = (lat2 - lat1) * Math.PI / 180;
+            const deltaLambda = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                      Math.cos(phi1) * Math.cos(phi2) *
+                      Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+        }
+
+        // 🛠️ 絕對 GPS 60m 獨立觸發邏輯
+        function processLocationLogic(uLat, uLng) {
+            const direction = document.getElementById('directionSelect').value;
+            
+            // 1. 尋找當前是否有任何一個車站距離手機小於等於 60 公尺
+            let triggeredStationIdx = null;
+            for (let i = 0; i < BASE_STATIONS.length; i++) {
+                let actual = getActiveCoords(BASE_STATIONS[i].id);
+                let dist = calcDistance(uLat, uLng, actual.lat, actual.lng);
+                if (dist <= TRIGGER_DISTANCE) {
+                    triggeredStationIdx = i;
+                    break; 
+                }
+            }
+
+            // 2. 如果成功踩到任何車站的 60m 範圍，強制跳轉成該站
+            if (triggeredStationIdx !== null) {
+                currentStationIndex = triggeredStationIdx;
+            }
+
+            // 3. 補救機制：如果剛打開網頁且車子不在任何一站的 60m 內，找絕對距離最近的一站做為初始錨點
+            if (currentStationIndex === null) {
+                let minDistance = Infinity;
+                let absoluteClosestIdx = 0;
+                BASE_STATIONS.forEach((st, idx) => {
+                    let actual = getActiveCoords(st.id);
+                    let dist = calcDistance(uLat, uLng, actual.lat, actual.lng);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        absoluteClosestIdx = idx;
+                    }
+                });
+                currentStationIndex = absoluteClosestIdx;
+            }
+
+            // 4. 計算並更新畫面顯示
+            const curSt = BASE_STATIONS[currentStationIndex];
+            let nextStIdx = (direction === 'up') ? currentStationIndex + 1 : currentStationIndex - 1;
+            let nextSt = BASE_STATIONS[nextStIdx];
+
+            document.getElementById('currentStationTxt').innerText = `${curSt.id} ${curSt.name}`;
+            if (nextSt) {
+                document.getElementById('nextStationTxt').innerText = `${nextSt.id} ${nextSt.name}`;
+                document.getElementById('intervalLabel').innerText = `${curSt.name} → ${nextSt.name}`;
+            } else {
+                document.getElementById('nextStationTxt').innerText = "已抵達終點站";
+                document.getElementById('intervalLabel').innerText = `${curSt.name} (終點)`;
+            }
+            
+            // 5. 效能防護罩機制
+            if (curSt.id !== lastRenderedStationId || direction !== lastRenderedDirection) {
+                lastRenderedStationId = curSt.id;
+                lastRenderedDirection = direction;
+                renderActiveNotices();
+            }
+        }
+
+        function renderActiveNotices() {
+            const container = document.getElementById('activeNoticeContainer');
+            if (globalNotices.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-400 italic">正在連線資料庫...</p>';
+                return;
+            }
+            if (currentStationIndex === null) {
+                container.innerHTML = '<p class="text-sm text-gray-400 italic">定位計算中...</p>';
+                return;
+            }
+
+            const direction = document.getElementById('directionSelect').value;
+            const currentStationId = BASE_STATIONS[currentStationIndex].id;
+            const activeNotices = getFilteredNotices();
+
+            const filtered = activeNotices.filter(n => n.stationId === currentStationId && n.direction === direction);
+            if (filtered.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-400 italic">🎉 此區間目前無標示注意點。</p>';
+                return;
+            }
+
+            container.innerHTML = '';
+            filtered.forEach(n => {
+                const item = document.createElement('div');
+                item.className = "bg-amber-50 p-3 rounded border border-amber-200 space-y-2 relative shadow-sm";
+                
+                let finalImgUrl = n.image ? n.image.trim() : '';
+                let cleanId = n.id.replace(/[^a-zA-Z0-9]/g, '');
+
+                // 🌟【拼寫修正】使用正確的直連格式與 ${fileId} 語法，解決單機破圖問題
+                if (finalImgUrl.includes('drive.google.com')) {
+                    let fileId = '';
+                    const dMatch = finalImgUrl.match(/\/d\/([^/]+)/);
+                    const idMatch = finalImgUrl.match(/[?&]id=([^&]+)/);
+                    if (dMatch && dMatch[1]) {
+                        fileId = dMatch[1];
+                    } else if (idMatch && idMatch[1]) {
+                        fileId = idMatch[1];
+                    }
+                    if (fileId) {
+                        finalImgUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
+                    }
+                }
+
+                let imgHtml = '';
+                if (finalImgUrl) {
+                    imgHtml = `
+                        <div class="mt-1">
+                            <img src="${finalImgUrl}" class="w-full h-auto rounded border border-gray-200 max-h-60 object-cover" alt="現場圖" 
+                                 onerror="this.style.display='none'; document.getElementById('err-${cleanId}').style.display='block';">
+                            <div id="err-${cleanId}" class="hidden p-2 bg-red-50 border border-red-200 text-xs text-red-600 rounded mt-1">
+                                ❌ <b>圖片載入失敗！請確認該雲端圖片已開啟「知道連結的任何人皆可檢視」分享權限。</b>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                item.innerHTML = `
+                    <p class="text-sm text-gray-800 font-medium">${n.text}</p>
+                    ${imgHtml}
+                    <button onclick="deleteNotice('${n.id}')" class="absolute top-1 right-2 text-xs text-gray-400 hover:text-red-500 font-bold">隱藏</button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function renderAllNoticesList() {
+            const container = document.getElementById('allNoticesList');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const activeNotices = getFilteredNotices();
+            if (activeNotices.length === 0) {
+                container.innerHTML = '<p class="text-sm text-gray-400 italic py-1">目前沒有任何注意點。</p>';
+                return;
+            }
+
+            activeNotices.forEach(n => {
+                const st = BASE_STATIONS.find(s => s.id === n.stationId);
+                const stName = st ? st.name : n.stationId;
+                const dirText = n.direction === 'up' ? '上行' : '下行';
+                const hasImg = n.image ? ' 🖼️' : '';
+                const item = document.createElement('div');
+                item.className = "flex justify-between items-center p-2.5 bg-gray-50 rounded border border-gray-200 text-xs shadow-sm";
+                item.innerHTML = `
+                    <div class="flex-1 min-w-0 pr-3">
+                        <span class="font-bold text-amber-800">[${stName} · ${dirText}]${hasImg}</span>
+                        <p class="text-gray-600 truncate mt-0.5">${n.text}</p>
+                    </div>
+                    <button onclick="deleteNotice('${n.id}')" class="text-red-400 hover:text-red-500 font-bold shrink-0 text-xs bg-white px-2 py-1 rounded border">隱藏</button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function deleteNotice(id) {
+            if(!confirm("要在本機畫面上隱藏此注意點嗎？")) return;
+            let localDeleted = JSON.parse(localStorage.getItem('deleted_sheet_notices') || '[]');
+            if (!localDeleted.includes(String(id))) {
+                localDeleted.push(String(id));
+                localStorage.setItem('deleted_sheet_notices', JSON.stringify(localDeleted));
+            }
+            lastRenderedStationId = null;
+            renderActiveNotices();
+            renderAllNoticesList();
+        }
+
+        async function requestWakeLock() {
+            if (wakeLock !== null) return;
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    const wlStatus = document.getElementById('wakeLockStatus');
+                    if (wlStatus) {
+                        wlStatus.className = "text-xs text-green-700 mt-1 font-medium bg-green-50 p-2 rounded border border-green-200";
+                        wlStatus.innerHTML = '☕ 螢幕常亮：🟢 已啟用 (手機將不會黑屏)';
+                    }
+                    wakeLock.addEventListener('release', () => {
+                        wakeLock = null;
+                        const wlStatus = document.getElementById('wakeLockStatus');
+                        if (wlStatus) {
+                            wlStatus.className = "text-xs text-amber-700 mt-1 font-medium bg-amber-50 p-2 rounded border border-amber-200";
+                            wlStatus.innerHTML = '⚠️ 螢幕常亮：已自動解除 (點擊畫面任一處可重新啟用)';
+                        }
+                    });
+                } catch (err) {
+                    const wlStatus = document.getElementById('wakeLockStatus');
+                    if (wlStatus) {
+                        wlStatus.className = "text-xs text-red-600 mt-1 font-medium bg-red-50 p-2 rounded border border-red-200";
+                        wlStatus.innerHTML = `⚠️ 螢幕常亮失敗：請關閉「低電量模式」並點擊畫面重試。`;
+                    }
+                    wakeLock = null;
+                }
+            }
+        }
+
+        document.addEventListener('click', () => { requestWakeLock(); });
+
+        function handleDirectionChange() {
+            currentStationIndex = null;
+            document.getElementById('currentStationTxt').innerText = "重新計算中...";
+            document.getElementById('nextStationTxt').innerText = "重新計算中...";
+            lastRenderedStationId = null;
+            renderActiveNotices();
+            requestWakeLock(); 
+        }
+
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                await requestWakeLock();
+            }
+        });
+    </script>
+</body>
+</html>
