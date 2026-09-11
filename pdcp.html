@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>文湖線月台門訓練機 V4.3 (多劇本引擎版)</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background-color: #111; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* --- 頂部超薄控制列 --- */
+        .top-control-bar { background: #2c3e50; width: 100%; display: flex; flex-direction: column; box-shadow: 0 4px 6px rgba(0,0,0,0.5); z-index: 10; flex-shrink: 0; }
+        
+        .instructor-row { display: flex; padding: 6px 10px; gap: 8px; align-items: center; background: #1a252f; border-bottom: 1px solid #34495e; flex-wrap: wrap;}
+        .instructor-row select { flex: 1; padding: 6px; border-radius: 4px; background: #ecf0f1; border: none; font-size: 14px; font-weight: bold; min-width: 150px;}
+        .btn-action { padding: 6px 12px; cursor: pointer; background: #e74c3c; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 14px; white-space: nowrap;}
+        .btn-action.green { background: #27ae60; }
+        .btn-action:active { transform: scale(0.95); }
+
+        /* 固定置中狀態列 (加入紅色錯誤樣式) */
+        .status-row { background: #000; color: #0f0; padding: 8px 10px; font-weight: bold; text-align: center; font-size: 15px; border-bottom: 2px solid #333; display: flex; justify-content: center; align-items: center; min-height: 24px; transition: color 0.2s;}
+        .status-row.error { color: #ff4d4d; }
+
+        /* --- 滿版硬體面板容器 --- */
+        .panel-wrapper { flex: 1; display: flex; justify-content: center; align-items: center; padding: 5px; overflow: hidden; }
+        
+        .hardware-panel {
+            height: 98%; 
+            aspect-ratio: 42 / 100;
+            max-width: 100%;
+            position: relative;
+            background: linear-gradient(135deg, #fdfdfd 0%, #e9ecef 100%);
+            border: 3px solid #b0b5b9;
+            border-radius: 2px;
+            box-shadow: inset 2px 2px 5px rgba(255,255,255,0.8), inset -2px -2px 10px rgba(0,0,0,0.1);
+            user-select: none; -webkit-user-select: none;
+            font-size: 10px; 
+        }
+
+        .bottom-grey-section { position: absolute; bottom: 0; width: 100%; height: 12%; background: linear-gradient(to bottom, #d5d7d8 0%, #aeb2b5 50%, #95999c 100%); border-top: 2px solid #8c9094; box-shadow: inset 0 8px 10px -5px rgba(255,255,255,0.7); }
+
+        /* --- UI 元件共用樣式 --- */
+        .component { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .label-text { font-size: 0.7em; color: #222; font-weight: bold; text-align: center; line-height: 1.1; margin-top: 2px; letter-spacing: 0.1px; white-space: nowrap; transform: scale(0.85); transform-origin: top center;}
+        .label-eng { font-size: 0.6em; color: #555; }
+        .label-yellow { background: #f1c40f; padding: 1px 3px; border-radius: 1px; border: 1px solid #d4ac0d; font-size: 0.75em; font-weight: bold; color: #111; white-space: nowrap; }
+
+        .led-bezel { width: 2.2em; height: 2.2em; border-radius: 50%; background: linear-gradient(135deg, #ddd, #aaa); display: flex; align-items: center; justify-content: center; box-shadow: 1px 1px 3px rgba(0,0,0,0.4), inset 1px 1px 2px #fff; }
+        .led { width: 1.4em; height: 1.4em; border-radius: 50%; transition: 0.2s; }
+        .led.green { background: radial-gradient(circle at 35% 35%, #82e0aa 0%, #2ecc71 40%, #1d8348 100%); box-shadow: 0 0 5px #2ecc71; }
+        .led.red { background: radial-gradient(circle at 35% 35%, #f1948a 0%, #e74c3c 40%, #922b21 100%); box-shadow: 0 0 5px #e74c3c; }
+        .led.white { background: radial-gradient(circle at 35% 35%, #fff 0%, #ecf0f1 40%, #bdc3c7 100%); box-shadow: 0 0 5px #fff; }
+        .led.off { background: radial-gradient(circle at 40% 40%, #444, #111) !important; box-shadow: inset 1px 1px 3px rgba(0,0,0,0.9) !important; border: 1px solid #000; }
+
+        .knob { width: 2.4em; height: 2.4em; border-radius: 50%; position: relative; box-shadow: 1px 2px 4px rgba(0,0,0,0.5); transition: transform 0.2s; transform: rotate(-45deg); cursor: pointer; }
+        .knob::after { content: ''; position: absolute; top: 1px; left: 50%; transform: translateX(-50%); width: 0.3em; height: 0.8em; background: #fff; border-radius: 1px; }
+        .knob.black { background: linear-gradient(135deg, #333, #111); border: 1px solid #000; }
+        .knob.green { background: linear-gradient(135deg, #27ae60, #145a32); border: 1px solid #0e3b20; }
+        .knob.red { background: linear-gradient(135deg, #c0392b, #7b241c); border: 1px solid #511812; width: 2.8em; height: 2.8em; top: -2px;}
+        .knob.red::after { height: 1.2em; top: 0; }
+        .knob.on { transform: rotate(45deg); }
+
+        .keyhole-bezel { width: 3em; height: 3em; border-radius: 50%; background: linear-gradient(135deg, #f5f5f5, #b3b3b3); border: 1px solid #888; box-shadow: 1px 2px 4px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .keyhole-inner { width: 1.8em; height: 1.8em; border-radius: 50%; background: #222; box-shadow: inset 1px 1px 3px #000; display: flex; align-items: center; justify-content: center; transition: 0.3s; }
+        .keyhole-slot { width: 0.25em; height: 1em; background: #555; transition: 0.3s; }
+        .keyhole-bezel.active .keyhole-inner { background: #333; }
+        .keyhole-bezel.active .keyhole-slot { transform: rotate(90deg); background: #f1c40f; box-shadow: 0 0 3px #f1c40f; }
+
+        .push-btn-bezel { border-radius: 50%; background: linear-gradient(135deg, #ddd, #999); display: flex; align-items: center; justify-content: center; box-shadow: 1px 2px 4px rgba(0,0,0,0.5); cursor: pointer; }
+        .push-btn { border-radius: 50%; transition: 0.1s; box-shadow: inset 1px 1px 2px rgba(255,255,255,0.6); }
+        
+        .push-btn-bezel.ed { width: 4.5em; height: 4.5em; border: 1px solid #777; }
+        .push-btn.ed { width: 3.2em; height: 3.2em; background: radial-gradient(circle at 35% 35%, #ff4d4d, #c0392b); box-shadow: 0 3px 0 #7b241c, 0 4px 6px rgba(0,0,0,0.5); }
+        .push-btn-bezel.ed:active .push-btn.ed, .push-btn-bezel.ed.pressed .push-btn.ed { transform: translateY(3px); box-shadow: 0 0 0 #7b241c, 0 1px 2px rgba(0,0,0,0.5); }
+
+        .push-btn-bezel.sd { width: 3.4em; height: 3.4em; border: 1px solid #777; }
+        .push-btn.sd { width: 2.4em; height: 2.4em; background: radial-gradient(circle at 35% 35%, #f4d03f, #d4ac0d); box-shadow: 0 3px 0 #9c640c; }
+        .push-btn-bezel.sd:active .push-btn.sd, .push-btn-bezel.sd.pressed .push-btn.sd { transform: translateY(3px); box-shadow: 0 0 0 #9c640c; }
+
+        .push-btn-bezel.black { width: 2.5em; height: 2.5em; border: none; }
+        .push-btn.black { width: 1.8em; height: 1.8em; background: linear-gradient(135deg, #444, #111); box-shadow: 0 2px 0 #000; color: #f1c40f; display: flex; align-items: center; justify-content: center; font-size: 0.8em; font-weight: bold;}
+        .push-btn-bezel.black:active .push-btn.black, .push-btn-bezel.black.pressed .push-btn.black { transform: translateY(2px); box-shadow: 0 0 0 #000; }
+    </style>
+</head>
+<body>
+
+<div class="top-control-bar">
+    <div class="instructor-row">
+        <select id="scenario-selector">
+            <option value="door2">演練 1：2號月台門故障 (燈滅)</option>
+            <option value="ems">演練 2：緊急門 EMS 作動 (燈滅)</option>
+            <option value="manual_door">演練 3：列車停妥手動開啟全部月台門,關閉月台門</option>
+        </select>
+        <button class="btn-action" onclick="triggerScenario()">發送狀況</button>
+        <button class="btn-action green" onclick="resetSystem()">系統復原</button>
+    </div>
+    <!-- 修正為固定文字，並支援變色 -->
+    <div class="status-row" id="status-container">
+        <span id="status-text">🟢 系統正常，列車待命中。</span>
+    </div>
+</div>
+
+<div class="panel-wrapper">
+    <div class="hardware-panel" id="panel-container" oncontextmenu="return false;">
+        <div class="bottom-grey-section"></div>
+        <!-- 設備動態生成區 -->
+    </div>
+</div>
+
+<script>
+    const panel = document.getElementById('panel-container');
+    function createLabel(zh, en) { return `<div class="label-text">${zh}<br><span class="label-eng">${en}</span></div>`; }
+
+    const col1 = 16, col2 = 32, col3 = 48, col4 = 72, col5 = 88;
+    const leftYs = [6.5, 13, 19.5, 26, 32.5, 39, 45.5, 52, 61, 67.5, 74, 80.5];
+
+    // 1 & 2. 左側陣列與綠燈
+    for(let i=1; i<=8; i++) {
+        let y = leftYs[i-1];
+        let greenId = (i === 2) ? 'id="light-door1"' : ''; 
+        panel.innerHTML += `
+            <div class="component" style="left:${col1}%; top:${y}%;">
+                <div class="led-bezel"><div class="led green" ${greenId}></div></div>
+                ${createLabel(`自動門1-${i}閉鎖`, `CLOSE & LOCKED`)}
+            </div>
+            <div class="component" style="left:${col2}%; top:${y}%;">
+                <div class="led-bezel"><div class="led red off"></div></div>
+                ${createLabel(`自動門${i}故障`, `MALFUNCTION`)}
+            </div>
+            <div class="component" style="left:${col3}%; top:${y}%;">
+                <div class="knob black"></div>
+                ${createLabel(`自動門${i}切換`, `CUTOUT / AUTO`)}
+            </div>`;
+    }
+
+    const labels_bottom = [
+        {zh: "所有自動門閉鎖", en: "ALL ASD CLOSE & LOCKED", id: ""},
+        {zh: "第1-2 (POSITION 1-2)", en: "CLOSE & LOCKED", id: ""},
+        {zh: "1-20", en: "", id: 'id="light-ems"'},
+        {zh: "21-40", en: "", id: ""}
+    ];
+    for(let i=0; i<4; i++) {
+        let y = leftYs[8+i];
+        let scale = (i>=2) ? 'transform: scale(1.1);' : '';
+        panel.innerHTML += `
+            <div class="component" style="left:${col1}%; top:${y}%;">
+                <div class="led-bezel"><div class="led green" ${labels_bottom[i].id}></div></div>
+                <div class="label-text" style="${scale}">${labels_bottom[i].zh}<br><span class="label-eng">${labels_bottom[i].en}</span></div>
+            </div>`;
+    }
+
+    // 3. 右側控制面板 (解鎖旋鈕 1、2 與 3號蜂鳴器)
+    const rightComponents = [
+        {x: col4, y: 7.5, html: `<div class="led-bezel"><div class="led white off"></div></div>${createLabel('電源指示','PDCP POWER')}`},
+        {x: col5, y: 7.5, html: `<div class="led-bezel"><div class="led red off"></div></div>${createLabel('斷路器指示','PDCP MCP')}`},
+        {x: col5, y: 15.5, html: `<div class="knob black" id="lamp-test-sw" onclick="operateLampTest()"></div>${createLabel('燈號測試鈕','LAMP TEST ON/OFF')}`},
+        {x: col4, y: 22.5, html: `<div class="led-bezel"><div class="led white off"></div></div>${createLabel('自動門完全開啟','FULLY OPEN')}`},
+        {x: col4, y: 30, html: `<div class="led-bezel"><div class="led red off"></div></div>${createLabel('自動門阻塞','OBSTRUCTION')}`},
+        {x: col5, y: 36.5, html: `<div class="label-text" style="margin-bottom:2px;">自動 AUTO&nbsp;&nbsp;手動 MANUAL</div><div class="keyhole-bezel" id="key-hole" onclick="toggleKey()"><div class="keyhole-inner"><div class="keyhole-slot"></div></div></div><div class="label-yellow" style="margin-top: 5px;">請壓到底再轉</div>`},
+        {x: col4, y: 43.5, html: `<div class="led-bezel"><div class="led white off"></div></div>${createLabel('自動門開啟警示聲','OPEN INDICATOR')}`},
+        // 解鎖旋鈕 1
+        {x: col4, y: 53.5, html: `<div class="label-text" style="position:absolute; top:-10px; font-size:0.6em; left:-2em;">開<br>OPEN</div><div class="knob green" id="knob-cmd-1" onclick="toggleKnob1()"></div><div class="label-text" style="position:absolute; top:-10px; font-size:0.6em; right:-2.5em;">閉<br>CLOSE</div><div class="label-text" style="position:absolute; left:-2.5em; font-size:1.2em;">1</div>${createLabel('自動門開啟指令','OPEN COMMAND')}`},
+        // 解鎖旋鈕 2
+        {x: col4, y: 62.5, html: `<div class="label-text" style="position:absolute; top:-10px; font-size:0.6em; left:-2.5em;">開<br>ENABLE</div><div class="knob green" id="knob-cmd-2" onclick="toggleKnob2()"></div><div class="label-text" style="position:absolute; top:-10px; font-size:0.6em; right:-3em;">閉<br>DISABLE</div><div class="label-text" style="position:absolute; left:-2.5em; font-size:1.2em;">2</div>${createLabel('自動門作動指令','ENABLE COMMAND')}`},
+        {x: col5, y: 58, html: `<div class="label-yellow" style="background:transparent; border-color:#f1c40f; color:#f1c40f;">※務必同時轉動<br>旋鈕1、旋鈕2</div>`},
+        // 解鎖 3號蜂鳴器
+        {x: col4, y: 70.5, html: `<div class="push-btn-bezel black" id="buzzer-bezel" onmousedown="pressBuzzer()" onmouseup="releaseBuzzer()" ontouchstart="pressBuzzer(); event.preventDefault();" ontouchend="releaseBuzzer(); event.preventDefault();"><div class="push-btn black">3</div></div>${createLabel('自動門蜂鳴器','BUZZER X LIGHT')}`},
+        {x: col3+10, y: 77.5, html: `<div class="knob black"></div>${createLabel('選擇位置 1','SELECTION 1')}`},
+        {x: col4+6, y: 77.5, html: `<div class="led-bezel"><div class="led white off"></div></div>${createLabel('執行位置 1','POSITION 1 ACTIVE')}`},
+        {x: col3+10, y: 84, html: `<div class="knob black"></div>${createLabel('選擇位置 2','SELECTION 2')}`},
+        {x: col4+6, y: 84, html: `<div class="led-bezel"><div class="led white off"></div></div>${createLabel('執行位置 2','POSITION 2 ACTIVE')}`}
+    ];
+
+    rightComponents.forEach(comp => {
+        panel.innerHTML += `<div class="component" style="left:${comp.x}%; top:${comp.y}%;">${comp.html}</div>`;
+    });
+
+    // 4. 底部 Bypass
+    panel.innerHTML += `
+        <div class="component" style="left: 20%; top: 94%;">
+            <div style="background:#e74c3c; color:white; font-size:0.6em; padding:2px; font-weight:bold; position:absolute; top:-3.5em; white-space:nowrap;">緊急門旁通按鈕<br>PUSH ON</div>
+            <div class="push-btn-bezel ed" id="ed-bypass-btn" onmousedown="pressBtn('ed')" onmouseup="releaseBtn('ed')" onmouseleave="releaseBtn('ed')" ontouchstart="pressBtn('ed'); event.preventDefault();" ontouchend="releaseBtn('ed'); event.preventDefault();">
+                <div class="push-btn ed"></div>
+            </div>
+            <div class="label-yellow" style="position:absolute; bottom:-3em; font-size:0.8em;">緊急門旁通<br>ED BYPASS</div>
+        </div>
+        <div class="component" style="left: 60%; top: 94%;">
+            <div class="label-text" style="position:absolute; top:-3em; font-size:0.7em;">SD Bypass<br>OFF &nbsp;&nbsp;&nbsp;&nbsp; ON</div>
+            <div class="knob red" id="sd-bypass-knob" onclick="toggleSDBypassKnob()"></div>
+            <div class="label-yellow" style="position:absolute; bottom:-3em; font-size:0.75em; left:-1.5em;">月台門旁通<br>SD BYPASS</div>
+        </div>
+        <div class="component" style="left: 82%; top: 94%;">
+            <div class="label-text" style="position:absolute; top:-3.5em; font-size:0.7em;">SD Bypass<br>Push ON</div>
+            <div class="push-btn-bezel sd" id="sd-bypass-btn" onmousedown="pressBtn('sd')" onmouseup="releaseBtn('sd')" onmouseleave="releaseBtn('sd')" ontouchstart="pressBtn('sd'); event.preventDefault();" ontouchend="releaseBtn('sd'); event.preventDefault();">
+                <div class="push-btn sd"></div>
+            </div>
+        </div>
+    `;
+
+    // ==========================================
+    // 多劇本引擎與 SOP 邏輯
+    // ==========================================
+    let state = { 
+        scenario: null,
+        keyInsertedAndManual: false, 
+        sdBypassKnobOn: false, 
+        lampTestDone: false, 
+        trainStatus: 'stopped',
+        // 演練3 專用狀態
+        knob1Open: false,
+        knob2Open: false,
+        doorPhase: 0 
+    };
+    let pressTimer;
+
+    // 升級版狀態更新：支援紅色錯誤顯示
+    function updateStatus(msg, isError = false) { 
+        const container = document.getElementById('status-container');
+        document.getElementById('status-text').innerText = msg; 
+        if(isError) {
+            container.classList.add('error');
+        } else {
+            container.classList.remove('error');
+        }
+    }
+
+    function triggerScenario() {
+        resetSystem(true); // 切換劇本時靜默重置設備狀態
+        state.scenario = document.getElementById('scenario-selector').value;
+        
+        if(state.scenario === 'door2') {
+            document.getElementById('light-door1').classList.add('off');
+            updateStatus("⚠️ [演練1] 2號月台門故障，燈號已熄滅！請進行旁通。");
+        } 
+        else if (state.scenario === 'ems') {
+            document.getElementById('light-ems').classList.add('off');
+            updateStatus("⚠️ [演練2] 緊急門 EMS 作動，燈號熄滅！請進行旁通。");
+        }
+        else if (state.scenario === 'manual_door') {
+            state.doorPhase = 0;
+            updateStatus("⚠️ [演練3] 列車已停妥。請手動開啟全部月台門，隨後關閉。");
+        }
+    }
+
+    function resetSystem(silent = false) {
+        state = { scenario: null, keyInsertedAndManual: false, sdBypassKnobOn: false, lampTestDone: false, trainStatus: 'stopped', knob1Open: false, knob2Open: false, doorPhase: 0 };
+        document.getElementById('light-door1').classList.remove('off');
+        document.getElementById('light-ems').classList.remove('off');
+        document.getElementById('key-hole').classList.remove('active');
+        document.getElementById('sd-bypass-knob').classList.remove('on');
+        document.getElementById('lamp-test-sw').classList.remove('on');
+        document.getElementById('knob-cmd-1').classList.remove('on');
+        document.getElementById('knob-cmd-2').classList.remove('on');
+        
+        if(!silent) updateStatus("🟢 系統已復原，請教官選擇劇本並發送狀況。");
+    }
+
+    // 鑰匙邏輯
+    function toggleKey() {
+        state.keyInsertedAndManual = !state.keyInsertedAndManual;
+        const el = document.getElementById('key-hole');
+        if(state.keyInsertedAndManual) {
+            el.classList.add('active');
+            if(state.scenario === 'manual_door') {
+                updateStatus("🔧 [步驟 1 正確] 鑰匙切換至手動。請轉動旋鈕 1、2 開啟車門。");
+            } else {
+                updateStatus("🔧 [動作] 鑰匙已切換至「手動 (MANUAL)」。");
+            }
+        } else {
+            el.classList.remove('active');
+            updateStatus("🔧 [動作] 鑰匙轉回「自動 (AUTO)」。");
+        }
+    }
+
+    // 演練 3：旋鈕 1 與 旋鈕 2 邏輯
+    function toggleKnob1() {
+        state.knob1Open = !state.knob1Open;
+        document.getElementById('knob-cmd-1').classList.toggle('on');
+        checkManualDoorState();
+    }
+    
+    function toggleKnob2() {
+        state.knob2Open = !state.knob2Open;
+        document.getElementById('knob-cmd-2').classList.toggle('on');
+        checkManualDoorState();
+    }
+
+    // 演練 3：判定開關門的核心引擎
+    function checkManualDoorState() {
+        if(state.scenario !== 'manual_door') return;
+
+        // 當兩顆旋鈕都轉到「開 (OPEN)」
+        if(state.knob1Open && state.knob2Open) {
+            if(!state.keyInsertedAndManual) {
+                updateStatus("❌ [錯誤] 開門前，必須先將鑰匙轉至手動模式！", true);
+            } else {
+                state.doorPhase = 1;
+                updateStatus("✅ [步驟 2 正確] 月台門已全數開啟！關門前請按壓蜂鳴器警告。");
+            }
+        } 
+        // 當兩顆旋鈕都轉回「關 (CLOSE)」
+        else if(!state.knob1Open && !state.knob2Open) {
+            if(state.doorPhase === 2) {
+                state.doorPhase = 3; // 演練結束
+                updateStatus("✅ [演練成功] 車門已順利關閉，演練 3 結束！請復原系統。");
+            } else if (state.doorPhase === 1) {
+                updateStatus("❌ [錯誤] 關門前，未按壓蜂鳴器發出警告！", true);
+            }
+        } 
+        // 一開一關 (過渡狀態)
+        else {
+            updateStatus("🔧 [動作] 轉動中... (※ 務必同時轉動旋鈕 1、2)");
+        }
+    }
+
+    // 演練 3：3號蜂鳴器按壓邏輯
+    function pressBuzzer() {
+        document.getElementById('buzzer-bezel').classList.add('pressed');
+        if(state.scenario === 'manual_door') {
+            if(state.doorPhase === 1) {
+                state.doorPhase = 2; // 蜂鳴器已響
+                updateStatus("🔔 [步驟 3 正確] 蜂鳴器作動中！請將旋鈕 1、2 轉回關閉。");
+            } else if (state.doorPhase === 0) {
+                updateStatus("❌ [錯誤] 車門尚未開啟，無法執行關門警告！", true);
+            } else if (state.doorPhase === 3) {
+                updateStatus("❌ [錯誤] 演練已結束，請勿隨意按壓蜂鳴器。", true);
+            }
+        }
+    }
+
+    function releaseBuzzer() {
+        document.getElementById('buzzer-bezel').classList.remove('pressed');
+    }
+
+    // 其他既有設備邏輯
+    function toggleSDBypassKnob() {
+        state.sdBypassKnobOn = !state.sdBypassKnobOn;
+        document.getElementById('sd-bypass-knob').classList.toggle('on');
+        updateStatus(state.sdBypassKnobOn ? "🔧 [動作] SD Bypass 旋鈕轉至 ON。" : "🔧 [動作] SD Bypass 旋鈕轉回 OFF。");
+    }
+
+    function operateLampTest() {
+        state.lampTestDone = true;
+        const el = document.getElementById('lamp-test-sw');
+        const light = document.getElementById('light-ems');
+        
+        el.classList.add('on');
+        light.classList.remove('off');
+        updateStatus("💡 [動作] 執行 Lamp Test，測試面板燈號...");
+        
+        setTimeout(() => {
+            el.classList.remove('on');
+            if(state.scenario === 'ems') light.classList.add('off');
+            updateStatus("💡 [動作] Lamp Test 完畢，確認為真實故障。");
+        }, 1200);
+    }
+
+    function pressBtn(type) {
+        document.getElementById(type + '-bypass-btn').classList.add('pressed');
+        if (state.trainStatus !== 'stopped') return;
+
+        if (type === 'sd' && state.scenario === 'door2') {
+            if (state.keyInsertedAndManual && state.sdBypassKnobOn) {
+                updateStatus("🚄 [正確] 持續按壓 SD Bypass... 列車離站中 (請按住 3 秒！)");
+                startTrainDeparture();
+            } else { updateStatus("❌ [錯誤] 需先轉鑰匙，並開啟 SD 旋鈕！", true); }
+        } 
+        else if (type === 'ed' && state.scenario === 'ems') {
+            if (state.lampTestDone) {
+                updateStatus("🚄 [正確] 持續按壓 ED Bypass... 列車離站中 (請按住 3 秒！)");
+                startTrainDeparture();
+            } else { updateStatus("❌ [錯誤] 需先執行燈號測試 (Lamp Test)！", true); }
+        } else { 
+            if(state.scenario) updateStatus("ℹ️ 無效操作：此劇本無需按壓此按鈕。", true); 
+        }
+    }
+
+    function releaseBtn(type) {
+        document.getElementById(type + '-bypass-btn').classList.remove('pressed');
+        clearTimeout(pressTimer);
+        if (state.trainStatus === 'departing') {
+            state.trainStatus = 'stopped';
+            updateStatus("❌ [失敗] 列車未完全離站即放開壓扣！列車急停。", true);
+        }
+    }
+
+    function startTrainDeparture() {
+        state.trainStatus = 'departing';
+        pressTimer = setTimeout(() => {
+            if(state.trainStatus === 'departing') {
+                state.trainStatus = 'departed';
+                updateStatus("✅ [演練成功] 列車已安全離站！請依 SOP 復原面板狀態。");
+            }
+        }, 3000);
+    }
+</script>
+</body>
+</html>
